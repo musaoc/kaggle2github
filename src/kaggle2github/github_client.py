@@ -61,7 +61,7 @@ class GitHubClient:
         self,
         repo_name: str,
         description: str = "",
-        private: bool = True,
+        private: bool = False,
         topics: Optional[List[str]] = None,
     ) -> Dict:
         """

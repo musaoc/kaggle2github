@@ -22,14 +22,146 @@ from kaggle2github import __version__
 from kaggle2github.config import (
     DEFAULT_DOWNLOAD_DIR,
     DEFAULT_REPOS_DIR,
+    find_downloaded_kaggle_json,
     get_github_token,
     get_kaggle_credentials,
+    install_kaggle_json,
+    save_kaggle_credentials,
 )
 from kaggle2github.github_client import GitHubClient
 from kaggle2github.kaggle_client import KaggleClient
 from kaggle2github.packager import RepoPackager
 
 console = Console()
+
+def cmd_setup(args: argparse.Namespace) -> None:
+    """Interactive setup wizard to configure Kaggle and GitHub credentials."""
+    console.print(Panel.fit(
+        "[bold cyan]kaggle2github Setup Wizard[/bold cyan]\n"
+        "Configure Kaggle and GitHub authentication in under 1 minute.",
+        border_style="cyan"
+    ))
+
+    # --- 1. Kaggle Setup ---
+    console.print("\n[bold yellow]Step 1: Kaggle API Authentication[/bold yellow]")
+    kaggle_user, kaggle_key = get_kaggle_credentials()
+    kaggle_ok = False
+
+    if kaggle_user and kaggle_key:
+        try:
+            client = KaggleClient(username=kaggle_user, key=kaggle_key)
+            client._get_api()
+            console.print(f"  [green]✔ Found and verified existing Kaggle credentials for @{kaggle_user}[/green]")
+            kaggle_ok = True
+        except Exception:
+            console.print(f"  [yellow]Existing Kaggle credentials for @{kaggle_user} failed verification.[/yellow]")
+
+    if not kaggle_ok:
+        # Check Downloads folder for recently downloaded kaggle.json
+        dl_json = find_downloaded_kaggle_json()
+        if dl_json:
+            console.print(f"  [cyan]Found 'kaggle.json' in your Downloads directory:[/cyan] {dl_json}")
+            use_dl = console.input("  Install this file to ~/.kaggle/kaggle.json? [Y/n]: ").strip().lower()
+            if use_dl in ("", "y", "yes"):
+                try:
+                    installed = install_kaggle_json(dl_json)
+                    client = KaggleClient()
+                    client._get_api()
+                    k_user, _ = get_kaggle_credentials()
+                    console.print(f"  [green]✔ Successfully installed and verified @{k_user}![/green] (Saved to {installed})")
+                    kaggle_user = k_user
+                    kaggle_ok = True
+                except Exception as e:
+                    console.print(f"  [red]Failed to verify downloaded token:[/red] {e}")
+
+    if not kaggle_ok:
+        console.print("\n  [bold]How to get your Kaggle token:[/bold]")
+        console.print("  1. Go to [link=https://www.kaggle.com/settings]https://www.kaggle.com/settings[/link]")
+        console.print("  2. Scroll down to the [bold]API[/bold] section")
+        console.print("  3. Click [bold]'Create New Token'[/bold] to download [cyan]kaggle.json[/cyan]\n")
+
+        token_path = console.input("  Enter path to your downloaded kaggle.json (or press Enter to enter key manually): ").strip().strip('"\'')
+        if token_path and Path(token_path).is_file():
+            try:
+                installed = install_kaggle_json(Path(token_path))
+                client = KaggleClient()
+                client._get_api()
+                k_user, _ = get_kaggle_credentials()
+                console.print(f"  [green]✔ Verified and installed for @{k_user}![/green] (Saved to {installed})")
+                kaggle_user = k_user
+                kaggle_ok = True
+            except Exception as e:
+                console.print(f"  [red]Error installing {token_path}:[/red] {e}")
+
+        if not kaggle_ok:
+            user_input = console.input("  Enter your Kaggle Username: ").strip()
+            key_input = console.input("  Enter your Kaggle API Key: ").strip()
+            if user_input and key_input:
+                try:
+                    installed = save_kaggle_credentials(user_input, key_input)
+                    client = KaggleClient(username=user_input, key=key_input)
+                    client._get_api()
+                    console.print(f"  [green]✔ Credentials saved to {installed} and verified![/green]")
+                    kaggle_user = user_input
+                    kaggle_ok = True
+                except Exception as e:
+                    console.print(f"  [red]Verification failed:[/red] {e}")
+
+    # --- 2. GitHub Setup ---
+    console.print("\n[bold yellow]Step 2: GitHub Personal Access Token[/bold yellow]")
+    gh_token = get_github_token()
+    gh_user = None
+
+    if gh_token:
+        try:
+            client = GitHubClient(token=gh_token)
+            gh_user = client.get_authenticated_user()
+            console.print(f"  [green]✔ Found valid GitHub token for @{gh_user}[/green]")
+        except Exception:
+            console.print("  [yellow]Existing GitHub token failed verification.[/yellow]")
+
+    if not gh_user:
+        console.print("\n  [bold]How to generate your GitHub token:[/bold]")
+        console.print("  1. Visit: [link=https://github.com/settings/tokens/new?scopes=repo&description=kaggle2github]https://github.com/settings/tokens/new?scopes=repo&description=kaggle2github[/link]")
+        console.print("  2. Select scope: [bold]repo[/bold] (allows creating and pushing to public/private repositories)")
+        console.print("  3. Click [bold]'Generate token'[/bold] and copy the string.\n")
+
+        token_input = console.input("  Paste your GitHub Token (or press Enter to set via environment variable later): ").strip()
+        if token_input:
+            try:
+                client = GitHubClient(token=token_input)
+                gh_user = client.get_authenticated_user()
+                os.environ["GITHUB_TOKEN"] = token_input
+                console.print(f"  [green]✔ GitHub account verified: @{gh_user}[/green]")
+                console.print("\n  [dim]To persist this token across future terminal sessions:[/dim]")
+                if os.name == "nt":
+                    console.print(f'    [cyan]$env:GITHUB_TOKEN="{token_input}"[/cyan]  (PowerShell current session)')
+                    console.print(f'    [cyan][Environment]::SetEnvironmentVariable("GITHUB_TOKEN", "{token_input}", "User")[/cyan]  (Persistent)')
+                else:
+                    console.print(f'    [cyan]export GITHUB_TOKEN="{token_input}"[/cyan]  (Add to ~/.bashrc or ~/.zshrc)')
+            except Exception as e:
+                console.print(f"  [red]GitHub verification failed:[/red] {e}")
+
+    # --- Summary ---
+    console.print("\n" + "=" * 60)
+    if kaggle_ok and gh_user:
+        console.print(Panel(
+            f"[bold green]Authentication Complete! 🎉[/bold green]\n\n"
+            f"• Kaggle: [bold cyan]@{kaggle_user}[/bold cyan] (Ready to fetch public work)\n"
+            f"• GitHub: [bold cyan]@{gh_user}[/bold cyan] (Ready to publish public repositories)\n\n"
+            f"Run the complete migration in one command:\n"
+            f"[bold]kaggle2github run-all --user {kaggle_user} --github-user {gh_user}[/bold]",
+            title="Setup Summary",
+            border_style="green",
+        ))
+    else:
+        console.print(Panel(
+            f"• Kaggle: {'[green]Connected[/green]' if kaggle_ok else '[red]Not configured[/red]'}\n"
+            f"• GitHub: {'[green]Connected[/green]' if gh_user else '[yellow]Not set (required only for publishing)[/yellow]'}\n\n"
+            f"Run [bold cyan]kaggle2github setup[/bold cyan] anytime to update settings.",
+            title="Setup Status",
+            border_style="yellow",
+        ))
 
 def cmd_scan(args: argparse.Namespace) -> None:
     """Scan and list public Kaggle notebooks."""
@@ -38,17 +170,19 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
     if not target_user:
         console.print("[bold red]Error:[/bold red] Kaggle username must be specified via --user or KAGGLE_USERNAME.")
+        console.print("Tip: Run [bold cyan]kaggle2github setup[/bold cyan] to configure authentication.")
         sys.exit(1)
 
-    with console.status(f"[bold green]Fetching public kernels for {target_user}..."):
+    with console.status(f"[bold green]Fetching public kernels for @{target_user}..."):
         try:
             kernels = client.list_kernels(user=target_user, page_size=args.page_size)
         except Exception as e:
             console.print(f"[bold red]Failed to fetch kernels:[/bold red] {e}")
+            console.print("Tip: Run [bold cyan]kaggle2github setup[/bold cyan] to verify your Kaggle credentials.")
             sys.exit(1)
 
     if not kernels:
-        console.print(f"[yellow]No public kernels found for user '{target_user}'.[/yellow]")
+        console.print(f"[yellow]No public kernels found for user '@{target_user}'.[/yellow]")
         return
 
     table = Table(title=f"Kaggle Kernels Catalog for @{target_user} ({len(kernels)} total)")
@@ -71,6 +205,7 @@ def cmd_download(args: argparse.Namespace) -> None:
 
     if not target_user:
         console.print("[bold red]Error:[/bold red] Kaggle username must be specified via --user or KAGGLE_USERNAME.")
+        console.print("Tip: Run [bold cyan]kaggle2github setup[/bold cyan] to configure authentication.")
         sys.exit(1)
 
     out_dir = Path(args.output_dir)
@@ -78,12 +213,13 @@ def cmd_download(args: argparse.Namespace) -> None:
 
     slugs = args.slugs
     if not slugs:
-        with console.status(f"[bold green]Fetching kernel list for {target_user}..."):
+        with console.status(f"[bold green]Fetching kernel list for @{target_user}..."):
             try:
                 kernels = client.list_kernels(user=target_user)
                 slugs = [k["slug"] for k in kernels]
             except Exception as e:
                 console.print(f"[bold red]Failed to list kernels:[/bold red] {e}")
+                console.print("Tip: Run [bold cyan]kaggle2github setup[/bold cyan] to verify your credentials.")
                 sys.exit(1)
 
     console.print(f"[bold cyan]Downloading {len(slugs)} kernel(s) to '{out_dir}'...[/bold cyan]")
@@ -149,18 +285,18 @@ def cmd_build(args: argparse.Namespace) -> None:
 
     console.print(table)
     console.print(f"\n[green]All repositories generated in '{out_dir}'.[/green]")
-    console.print(f"To publish to GitHub: [bold]kaggle2github publish --repos-dir {out_dir}[/bold]")
+    console.print(f"To publish to GitHub (Public by default): [bold]kaggle2github publish --repos-dir {out_dir}[/bold]")
 
 def cmd_publish(args: argparse.Namespace) -> None:
-    """Create GitHub repositories and push local code."""
+    """Create GitHub repositories and push local code (Public by default)."""
     repos_dir = Path(args.repos_dir)
     if not repos_dir.exists():
         console.print(f"[bold red]Error:[/bold red] Directory '{repos_dir}' does not exist.")
         sys.exit(1)
 
-    token = args.token or get_github_token()
+    token = getattr(args, "token", None) or get_github_token()
     if not token:
-        console.print("[bold red]Error:[/bold red] GitHub token required. Set GITHUB_TOKEN or pass --token.")
+        console.print("[bold red]Error:[/bold red] GitHub token required. Run [bold cyan]kaggle2github setup[/bold cyan] or set GITHUB_TOKEN.")
         sys.exit(1)
 
     client = GitHubClient(token=token, github_user=args.user)
@@ -168,6 +304,7 @@ def cmd_publish(args: argparse.Namespace) -> None:
         user = client.get_authenticated_user()
     except Exception as e:
         console.print(f"[bold red]GitHub Authentication Error:[/bold red] {e}")
+        console.print("Tip: Run [bold cyan]kaggle2github setup[/bold cyan] to verify your token.")
         sys.exit(1)
 
     repo_folders = [d for d in repos_dir.iterdir() if d.is_dir() and (d / "README.md").exists()]
@@ -175,7 +312,8 @@ def cmd_publish(args: argparse.Namespace) -> None:
         console.print(f"[yellow]No built repository folders found in '{repos_dir}'.[/yellow]")
         return
 
-    visibility_str = "PUBLIC" if args.public else "PRIVATE"
+    is_private = getattr(args, "private", False)
+    visibility_str = "PRIVATE" if is_private else "PUBLIC"
     console.print(f"[bold cyan]Publishing {len(repo_folders)} repositories to GitHub as {visibility_str}...[/bold cyan]")
 
     for idx, rpath in enumerate(repo_folders, start=1):
@@ -187,7 +325,7 @@ def cmd_publish(args: argparse.Namespace) -> None:
             client.ensure_repository(
                 repo_name=repo_name,
                 description="Production-structured machine learning project migrated from Kaggle.",
-                private=not args.public,
+                private=is_private,
                 topics=["kaggle", "machine-learning", "python", "data-science"],
             )
             console.print(f"  [green]OK[/green] Remote repo verified ({visibility_str})")
@@ -212,6 +350,13 @@ def cmd_publish(args: argparse.Namespace) -> None:
 def cmd_run_all(args: argparse.Namespace) -> None:
     """Execute scan, download, build, and publish sequentially."""
     console.print(Panel.fit("[bold cyan]kaggle2github[/bold cyan] - Full Pipeline Execution", border_style="cyan"))
+
+    # Credential check warning
+    k_user, k_key = get_kaggle_credentials()
+    if not (k_user and k_key) and not getattr(args, "user", None):
+        console.print("[yellow]Warning: Kaggle credentials not found in environment or ~/.kaggle/kaggle.json.[/yellow]")
+        console.print("Run [bold cyan]kaggle2github setup[/bold cyan] first if downloads fail.")
+
     cmd_download(args)
     cmd_build(args)
     cmd_publish(args)
@@ -223,6 +368,10 @@ def main() -> None:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", help="Sub-commands")
+
+    # setup
+    p_setup = subparsers.add_parser("setup", help="Interactive setup wizard for Kaggle & GitHub authentication")
+    p_setup.set_defaults(func=cmd_setup)
 
     # scan
     p_scan = subparsers.add_parser("scan", help="Scan and list public Kaggle kernels")
@@ -247,11 +396,12 @@ def main() -> None:
     p_build.set_defaults(func=cmd_build)
 
     # publish
-    p_pub = subparsers.add_parser("publish", help="Create GitHub repos and push code")
+    p_pub = subparsers.add_parser("publish", help="Create GitHub repos and push code (Public by default)")
     p_pub.add_argument("--repos-dir", default=DEFAULT_REPOS_DIR, help="Directory containing generated repositories")
     p_pub.add_argument("--user", help="GitHub username")
     p_pub.add_argument("--token", help="GitHub Personal Access Token (defaults to GITHUB_TOKEN)")
-    p_pub.add_argument("--public", action="store_true", help="Publish repositories as public (default: private)")
+    p_pub.add_argument("--private", action="store_true", help="Publish repositories as private (default: public)")
+    p_pub.add_argument("--public", action="store_true", help=argparse.SUPPRESS)
     p_pub.add_argument("--git-name", help="Git user.name for commits")
     p_pub.add_argument("--git-email", help="Git user.email for commits")
     p_pub.set_defaults(func=cmd_publish)
@@ -263,7 +413,8 @@ def main() -> None:
     p_all.add_argument("--slugs", nargs="*", help="Specific kernel slugs (optional)")
     p_all.add_argument("--author", help="Author name")
     p_all.add_argument("--token", help="GitHub token")
-    p_all.add_argument("--public", action="store_true", help="Publish as public")
+    p_all.add_argument("--private", action="store_true", help="Publish repositories as private (default: public)")
+    p_all.add_argument("--public", action="store_true", help=argparse.SUPPRESS)
     p_all.add_argument("--input-dir", default=DEFAULT_DOWNLOAD_DIR, help="Staging directory")
     p_all.add_argument("--output-dir", default=DEFAULT_REPOS_DIR, help="Repositories directory")
     p_all.add_argument("--repos-dir", default=DEFAULT_REPOS_DIR, help="Repositories directory")
