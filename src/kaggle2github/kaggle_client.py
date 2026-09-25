@@ -1,10 +1,9 @@
-"""
-Kaggle API client wrapper for listing and downloading user kernels.
-"""
-
+import concurrent.futures
+import json
 import os
-from typing import Dict, List, Optional
+import shutil
 from pathlib import Path
+from typing import Dict, List, Optional
 from kaggle2github.config import get_kaggle_credentials
 
 class KaggleClient:
@@ -35,6 +34,24 @@ class KaggleClient:
                 )
         return self._api
 
+    def is_kernel_private(self, user: str, slug: str) -> bool:
+        """
+        Check whether a specific kernel is private using the Kaggle SDK.
+        """
+        try:
+            from kagglesdk.kernels.types.kernels_api_service import ApiGetKernelRequest
+            api = self._get_api()
+            client = api.build_kaggle_client()
+            req = ApiGetKernelRequest()
+            req.user_name = user
+            req.kernel_slug = slug
+            resp = client.kernels.kernels_api_client.get_kernel(req)
+            if resp and resp.metadata:
+                return bool(getattr(resp.metadata, "is_private", False))
+        except Exception:
+            pass
+        return False
+
     def list_kernels(
         self,
         user: Optional[str] = None,
@@ -51,15 +68,11 @@ class KaggleClient:
         api = self._get_api()
         raw_kernels = api.kernels_list(user=target_user, page_size=page_size) or []
 
-        results = []
+        kernel_items = []
         for k in raw_kernels:
-            is_priv = bool(getattr(k, "is_private", False) or getattr(k, "isPrivate", False))
-            if not include_private and is_priv:
-                continue
-
             ref = getattr(k, "ref", "")
             slug = ref.split("/")[-1] if "/" in ref else getattr(k, "slug", "")
-            results.append({
+            kernel_items.append({
                 "ref": ref,
                 "slug": slug,
                 "title": getattr(k, "title", slug),
@@ -68,14 +81,38 @@ class KaggleClient:
                 "views": getattr(k, "totalViews", 0) or getattr(k, "total_views", 0),
                 "url": f"https://www.kaggle.com/code/{ref}",
                 "last_run": str(getattr(k, "lastRunTime", "") or getattr(k, "last_run_time", "")),
-                "is_private": is_priv,
             })
 
-        return results
+        if not include_private and kernel_items:
+            # Check privacy in parallel for fast verification
+            def _check(item):
+                is_priv = self.is_kernel_private(target_user, item["slug"])
+                return item, is_priv
 
-    def download_kernel(self, slug: str, output_dir: str, user: Optional[str] = None) -> Path:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                checked = list(executor.map(_check, kernel_items))
+
+            results = []
+            for item, is_priv in checked:
+                if not is_priv:
+                    item["is_private"] = False
+                    results.append(item)
+            return results
+
+        for item in kernel_items:
+            item["is_private"] = False
+        return kernel_items
+
+    def download_kernel(
+        self,
+        slug: str,
+        output_dir: str,
+        user: Optional[str] = None,
+        include_private: bool = False,
+    ) -> Optional[Path]:
         """
         Download a single kernel into output_dir/<slug>/.
+        If include_private is False and kernel is detected as private, it is skipped and removed.
         """
         target_user = user or self.username
         if not target_user:
@@ -87,4 +124,17 @@ class KaggleClient:
         api = self._get_api()
         kernel_ref = f"{target_user}/{slug}"
         api.kernels_pull(kernel_ref, path=str(dest_dir), metadata=True)
+
+        # Verify against downloaded kernel-metadata.json
+        meta_file = dest_dir / "kernel-metadata.json"
+        if meta_file.exists():
+            try:
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                if not include_private and meta.get("is_private") is True:
+                    shutil.rmtree(dest_dir, ignore_errors=True)
+                    return None
+            except Exception:
+                pass
+
         return dest_dir

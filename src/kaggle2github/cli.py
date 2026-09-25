@@ -260,8 +260,11 @@ def cmd_download(args: argparse.Namespace) -> None:
     for i, slug in enumerate(slugs, start=1):
         console.print(f"[{i}/{len(slugs)}] Downloading [bold]{slug}[/bold]...")
         try:
-            client.download_kernel(slug, output_dir=str(out_dir), user=target_user)
-            success_count += 1
+            res = client.download_kernel(slug, output_dir=str(out_dir), user=target_user, include_private=include_private)
+            if res:
+                success_count += 1
+            else:
+                console.print(f"  [yellow]Skipped {slug} (private kernel)[/yellow]")
         except Exception as e:
             console.print(f"  [red]Failed to download {slug}: {e}[/red]")
 
@@ -380,7 +383,7 @@ def cmd_publish(args: argparse.Namespace) -> None:
     console.print("\n[bold green]Publishing process completed![/bold green]")
 
 def cmd_run_all(args: argparse.Namespace) -> None:
-    """Execute scan, download, build, and publish sequentially."""
+    """Execute download, build, and publish sequentially."""
     console.print(Panel.fit("[bold cyan]kaggle2github[/bold cyan] - Full Pipeline Execution", border_style="cyan"))
 
     # Credential check warning
@@ -389,9 +392,38 @@ def cmd_run_all(args: argparse.Namespace) -> None:
         console.print("[yellow]Warning: Kaggle credentials not found in environment or ~/.kaggle/kaggle.json.[/yellow]")
         console.print("Run [bold cyan]kaggle2github setup[/bold cyan] first if downloads fail.")
 
-    cmd_download(args)
-    cmd_build(args)
-    cmd_publish(args)
+    staging_dir = getattr(args, "staging_dir", None) or getattr(args, "input_dir", DEFAULT_DOWNLOAD_DIR)
+    repos_dir = getattr(args, "repos_dir", None) or getattr(args, "output_dir", DEFAULT_REPOS_DIR)
+
+    # 1. Download into staging_dir
+    dl_args = argparse.Namespace(
+        user=args.user,
+        slugs=args.slugs,
+        output_dir=staging_dir,
+        include_private=getattr(args, "include_private", False),
+    )
+    cmd_download(dl_args)
+
+    # 2. Build from staging_dir into repos_dir
+    build_args = argparse.Namespace(
+        input_dir=staging_dir,
+        output_dir=repos_dir,
+        author=getattr(args, "author", None),
+        kaggle_user=args.user,
+        github_user=args.github_user,
+    )
+    cmd_build(build_args)
+
+    # 3. Publish to GitHub
+    pub_args = argparse.Namespace(
+        repos_dir=repos_dir,
+        user=args.github_user,
+        token=getattr(args, "token", None),
+        private=getattr(args, "private", False),
+        git_name=getattr(args, "git_name", None),
+        git_email=getattr(args, "git_email", None),
+    )
+    cmd_publish(pub_args)
 
 def main() -> None:
     parser = argparse.ArgumentParser(
