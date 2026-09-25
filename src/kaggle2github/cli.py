@@ -26,6 +26,7 @@ from kaggle2github.config import (
     get_github_token,
     get_kaggle_credentials,
     install_kaggle_json,
+    save_env_credentials,
     save_kaggle_credentials,
 )
 from kaggle2github.github_client import GitHubClient
@@ -36,6 +37,8 @@ console = Console()
 
 def cmd_setup(args: argparse.Namespace) -> None:
     """Interactive setup wizard to configure Kaggle and GitHub credentials."""
+    reconfigure = getattr(args, "reconfigure", False)
+
     console.print(Panel.fit(
         "[bold cyan]kaggle2github Setup Wizard[/bold cyan]\n"
         "Configure Kaggle and GitHub authentication in under 1 minute.",
@@ -47,12 +50,16 @@ def cmd_setup(args: argparse.Namespace) -> None:
     kaggle_user, kaggle_key = get_kaggle_credentials()
     kaggle_ok = False
 
-    if kaggle_user and kaggle_key:
+    if kaggle_user and kaggle_key and not reconfigure:
         try:
             client = KaggleClient(username=kaggle_user, key=kaggle_key)
             client._get_api()
-            console.print(f"  [green]✔ Found and verified existing Kaggle credentials for @{kaggle_user}[/green]")
-            kaggle_ok = True
+            console.print(f"  [green]✔ Found existing Kaggle credentials for @{kaggle_user}[/green]")
+            keep = console.input(f"  Keep using account @{kaggle_user}? [Y/n]: ").strip().lower()
+            if keep in ("", "y", "yes"):
+                kaggle_ok = True
+            else:
+                console.print("  [cyan]Switching to a different Kaggle account...[/cyan]")
         except Exception:
             console.print(f"  [yellow]Existing Kaggle credentials for @{kaggle_user} failed verification.[/yellow]")
 
@@ -112,11 +119,18 @@ def cmd_setup(args: argparse.Namespace) -> None:
     gh_token = get_github_token()
     gh_user = None
 
-    if gh_token:
+    if gh_token and not reconfigure:
         try:
             client = GitHubClient(token=gh_token)
             gh_user = client.get_authenticated_user()
             console.print(f"  [green]✔ Found valid GitHub token for @{gh_user}[/green]")
+            keep_gh = console.input(f"  Keep using GitHub account @{gh_user}? [Y/n]: ").strip().lower()
+            if keep_gh in ("", "y", "yes"):
+                pass
+            else:
+                console.print("  [cyan]Switching to a different GitHub account / token...[/cyan]")
+                gh_user = None
+                gh_token = None
         except Exception:
             console.print("  [yellow]Existing GitHub token failed verification.[/yellow]")
 
@@ -126,21 +140,30 @@ def cmd_setup(args: argparse.Namespace) -> None:
         console.print("  2. Select scope: [bold]repo[/bold] (allows creating and pushing to public/private repositories)")
         console.print("  3. Click [bold]'Generate token'[/bold] and copy the string.\n")
 
-        token_input = console.input("  Paste your GitHub Token (or press Enter to set via environment variable later): ").strip()
+        token_input = console.input("  Paste your GitHub Token: ").strip()
         if token_input:
             try:
                 client = GitHubClient(token=token_input)
                 gh_user = client.get_authenticated_user()
+                gh_token = token_input
                 os.environ["GITHUB_TOKEN"] = token_input
                 console.print(f"  [green]✔ GitHub account verified: @{gh_user}[/green]")
-                console.print("\n  [dim]To persist this token across future terminal sessions:[/dim]")
-                if os.name == "nt":
-                    console.print(f'    [cyan]$env:GITHUB_TOKEN="{token_input}"[/cyan]  (PowerShell current session)')
-                    console.print(f'    [cyan][Environment]::SetEnvironmentVariable("GITHUB_TOKEN", "{token_input}", "User")[/cyan]  (Persistent)')
-                else:
-                    console.print(f'    [cyan]export GITHUB_TOKEN="{token_input}"[/cyan]  (Add to ~/.bashrc or ~/.zshrc)')
             except Exception as e:
                 console.print(f"  [red]GitHub verification failed:[/red] {e}")
+
+    # --- 3. Save to .env ---
+    if kaggle_ok or gh_user:
+        console.print("\n[bold yellow]Step 3: Save to .env File[/bold yellow]")
+        save_env = console.input("  Save/update credentials in a local .env file? [Y/n]: ").strip().lower()
+        if save_env in ("", "y", "yes"):
+            k_u, k_k = get_kaggle_credentials()
+            env_file = save_env_credentials(
+                kaggle_username=k_u if kaggle_ok else None,
+                kaggle_key=k_k if kaggle_ok else None,
+                github_token=gh_token if gh_user else None,
+            )
+            console.print(f"  [green]✔ Credentials saved to {env_file.resolve()}[/green]")
+            console.print("  [dim](Tip: .env is automatically gitignored to protect your secrets)[/dim]")
 
     # --- Summary ---
     console.print("\n" + "=" * 60)
@@ -149,6 +172,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
             f"[bold green]Authentication Complete! 🎉[/bold green]\n\n"
             f"• Kaggle: [bold cyan]@{kaggle_user}[/bold cyan] (Ready to fetch public work)\n"
             f"• GitHub: [bold cyan]@{gh_user}[/bold cyan] (Ready to publish public repositories)\n\n"
+            f"Tip: You can edit [bold cyan].env[/bold cyan] directly or run [bold cyan]kaggle2github setup --reconfigure[/bold cyan] anytime to switch accounts.\n\n"
             f"Run the complete migration in one command:\n"
             f"[bold]kaggle2github run-all --user {kaggle_user} --github-user {gh_user}[/bold]",
             title="Setup Summary",
@@ -158,7 +182,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
         console.print(Panel(
             f"• Kaggle: {'[green]Connected[/green]' if kaggle_ok else '[red]Not configured[/red]'}\n"
             f"• GitHub: {'[green]Connected[/green]' if gh_user else '[yellow]Not set (required only for publishing)[/yellow]'}\n\n"
-            f"Run [bold cyan]kaggle2github setup[/bold cyan] anytime to update settings.",
+            f"Tip: Edit [bold cyan].env[/bold cyan] or run [bold cyan]kaggle2github setup[/bold cyan] anytime to update settings.",
             title="Setup Status",
             border_style="yellow",
         ))
@@ -371,6 +395,7 @@ def main() -> None:
 
     # setup
     p_setup = subparsers.add_parser("setup", help="Interactive setup wizard for Kaggle & GitHub authentication")
+    p_setup.add_argument("--reconfigure", "--force", action="store_true", help="Reconfigure credentials or switch connected accounts")
     p_setup.set_defaults(func=cmd_setup)
 
     # scan

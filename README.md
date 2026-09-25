@@ -41,6 +41,8 @@ kaggle2github setup
 > - Detects `kaggle.json` if it's already in your `Downloads` folder and installs it automatically.
 > - Automatically creates the `~/.kaggle/` directory with secure permissions.
 > - Verifies your Kaggle and GitHub credentials on the spot.
+> - Offers to save credentials directly to a local `.env` file for easy account switching.
+> - **Switch accounts anytime:** Run `kaggle2github setup --reconfigure` or edit your `.env` file!
 
 ### 3. Run Full Migration (One Command)
 ```bash
@@ -54,9 +56,28 @@ kaggle2github run-all --user <your_kaggle_username> --github-user <your_github_u
 
 ## 🔑 Authentication Details
 
-If you prefer manual setup instead of `kaggle2github setup`:
+### Quickest Method: Local `.env` File (Recommended)
+Copy [.env.example](.env.example) to `.env` in the repository root and fill in your keys:
+```bash
+cp .env.example .env
+```
+*(On Windows PowerShell: `Copy-Item .env.example .env`)*
 
-### Kaggle API Setup
+Inside `.env`:
+```ini
+KAGGLE_USERNAME=your_kaggle_username
+KAGGLE_KEY=your_kaggle_api_key
+GITHUB_TOKEN=ghp_your_github_token
+```
+`kaggle2github` automatically loads this `.env` file whenever you run commands. To switch accounts, simply change the values in `.env` or run `kaggle2github setup --reconfigure`.
+
+---
+
+### Alternative: Manual System Setup
+
+If you prefer system-wide setup instead of `.env`:
+
+#### Kaggle API Setup
 1. Log in to [Kaggle](https://www.kaggle.com) and go to your [Account Settings](https://www.kaggle.com/settings).
 2. Scroll to the **API** section and click **"Create New Token"**. This downloads `kaggle.json`.
 3. Place `kaggle.json` in the `.kaggle` folder in your home directory:
@@ -71,9 +92,8 @@ If you prefer manual setup instead of `kaggle2github setup`:
      mv ~/Downloads/kaggle.json ~/.kaggle/kaggle.json
      chmod 600 ~/.kaggle/kaggle.json
      ```
-   *(Or set `KAGGLE_USERNAME` and `KAGGLE_KEY` environment variables).*
 
-### GitHub Token Setup
+#### GitHub Token Setup
 1. Generate a Personal Access Token (classic) with **`repo`** scope at [GitHub Token Settings](https://github.com/settings/tokens/new?scopes=repo&description=kaggle2github).
 2. Set the token in your terminal:
    - **Windows (PowerShell)**:

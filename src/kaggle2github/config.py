@@ -7,14 +7,50 @@ import json
 from pathlib import Path
 from typing import Optional, Tuple
 
+try:
+    from dotenv import load_dotenv, set_key
+    DOTENV_AVAILABLE = True
+except ImportError:
+    DOTENV_AVAILABLE = False
+
 DEFAULT_DOWNLOAD_DIR = "downloaded_kernels"
 DEFAULT_REPOS_DIR = "repos"
 
+def load_env(env_path: Optional[Path] = None) -> bool:
+    """
+    Load environment variables from a .env file.
+    Checks specified path, cwd/.env, or searches upwards.
+    """
+    if not DOTENV_AVAILABLE:
+        return False
+    if env_path and Path(env_path).is_file():
+        load_dotenv(dotenv_path=env_path, override=True)
+        return True
+
+    # Check cwd/.env first
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.is_file():
+        load_dotenv(dotenv_path=cwd_env, override=False)
+        return True
+
+    return bool(load_dotenv(override=False))
+
+# Automatically load .env on module import
+load_env()
+
+def get_active_env_file() -> Optional[Path]:
+    """Returns the .env path if .env exists in current working directory."""
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.is_file():
+        return cwd_env
+    return None
+
 def get_kaggle_credentials() -> Tuple[Optional[str], Optional[str]]:
     """
-    Retrieve Kaggle credentials from environment variables or ~/.kaggle/kaggle.json.
+    Retrieve Kaggle credentials from environment variables (.env included) or ~/.kaggle/kaggle.json.
     Returns (username, key).
     """
+    load_env()
     username = os.environ.get("KAGGLE_USERNAME")
     key = os.environ.get("KAGGLE_KEY")
     if username and key:
@@ -34,9 +70,10 @@ def get_kaggle_credentials() -> Tuple[Optional[str], Optional[str]]:
 
 def get_github_token() -> Optional[str]:
     """
-    Retrieve GitHub Personal Access Token from environment variables.
+    Retrieve GitHub Personal Access Token from environment variables (.env included).
     Checks GITHUB_TOKEN and GH_TOKEN.
     """
+    load_env()
     return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
 
 def find_downloaded_kaggle_json() -> Optional[Path]:
@@ -110,5 +147,69 @@ def save_kaggle_credentials(username: str, key: str) -> Path:
             
     os.environ["KAGGLE_USERNAME"] = data["username"]
     os.environ["KAGGLE_KEY"] = data["key"]
+    return target
+
+def save_env_credentials(
+    kaggle_username: Optional[str] = None,
+    kaggle_key: Optional[str] = None,
+    github_token: Optional[str] = None,
+    env_path: Optional[Path] = None,
+) -> Path:
+    """
+    Save or update credentials in a .env file.
+    Creates the .env file in cwd (or specified path) if it doesn't exist.
+    """
+    target = env_path or (Path.cwd() / ".env")
+    target = Path(target)
+
+    if not target.exists():
+        target.touch()
+
+    # Update current process environment
+    if kaggle_username:
+        os.environ["KAGGLE_USERNAME"] = kaggle_username.strip()
+    if kaggle_key:
+        os.environ["KAGGLE_KEY"] = kaggle_key.strip()
+    if github_token:
+        os.environ["GITHUB_TOKEN"] = github_token.strip()
+
+    if DOTENV_AVAILABLE:
+        if kaggle_username:
+            set_key(str(target), "KAGGLE_USERNAME", kaggle_username.strip(), quote_mode="never")
+        if kaggle_key:
+            set_key(str(target), "KAGGLE_KEY", kaggle_key.strip(), quote_mode="never")
+        if github_token:
+            set_key(str(target), "GITHUB_TOKEN", github_token.strip(), quote_mode="never")
+    else:
+        lines = []
+        if target.exists():
+            with open(target, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        keys_to_set = {}
+        if kaggle_username:
+            keys_to_set["KAGGLE_USERNAME"] = kaggle_username.strip()
+        if kaggle_key:
+            keys_to_set["KAGGLE_KEY"] = kaggle_key.strip()
+        if github_token:
+            keys_to_set["GITHUB_TOKEN"] = github_token.strip()
+
+        new_lines = []
+        seen = set()
+        for line in lines:
+            trimmed = line.strip()
+            if "=" in trimmed and not trimmed.startswith("#"):
+                k, _ = trimmed.split("=", 1)
+                k = k.strip()
+                if k in keys_to_set:
+                    new_lines.append(f"{k}={keys_to_set[k]}\n")
+                    seen.add(k)
+                    continue
+            new_lines.append(line)
+        for k, v in keys_to_set.items():
+            if k not in seen:
+                new_lines.append(f"{k}={v}\n")
+        with open(target, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+
     return target
 
