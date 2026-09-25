@@ -197,19 +197,25 @@ def cmd_scan(args: argparse.Namespace) -> None:
         console.print("Tip: Run [bold cyan]kaggle2github setup[/bold cyan] to configure authentication.")
         sys.exit(1)
 
-    with console.status(f"[bold green]Fetching public kernels for @{target_user}..."):
+    include_private = getattr(args, "include_private", False)
+    privacy_label = "all (including private)" if include_private else "public"
+    with console.status(f"[bold green]Fetching {privacy_label} kernels for @{target_user}..."):
         try:
-            kernels = client.list_kernels(user=target_user, page_size=args.page_size)
+            kernels = client.list_kernels(
+                user=target_user,
+                page_size=args.page_size,
+                include_private=include_private,
+            )
         except Exception as e:
             console.print(f"[bold red]Failed to fetch kernels:[/bold red] {e}")
             console.print("Tip: Run [bold cyan]kaggle2github setup[/bold cyan] to verify your Kaggle credentials.")
             sys.exit(1)
 
     if not kernels:
-        console.print(f"[yellow]No public kernels found for user '@{target_user}'.[/yellow]")
+        console.print(f"[yellow]No {privacy_label} kernels found for user '@{target_user}'.[/yellow]")
         return
 
-    table = Table(title=f"Kaggle Kernels Catalog for @{target_user} ({len(kernels)} total)")
+    table = Table(title=f"Kaggle Kernels ({privacy_label.title()}) for @{target_user} ({len(kernels)} total)")
     table.add_column("#", justify="right", style="cyan", no_wrap=True)
     table.add_column("Slug", style="magenta")
     table.add_column("Title", style="bold white")
@@ -235,11 +241,13 @@ def cmd_download(args: argparse.Namespace) -> None:
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    include_private = getattr(args, "include_private", False)
     slugs = args.slugs
     if not slugs:
-        with console.status(f"[bold green]Fetching kernel list for @{target_user}..."):
+        privacy_label = "all (including private)" if include_private else "public"
+        with console.status(f"[bold green]Fetching {privacy_label} kernels for @{target_user}..."):
             try:
-                kernels = client.list_kernels(user=target_user)
+                kernels = client.list_kernels(user=target_user, include_private=include_private)
                 slugs = [k["slug"] for k in kernels]
             except Exception as e:
                 console.print(f"[bold red]Failed to list kernels:[/bold red] {e}")
@@ -402,12 +410,14 @@ def main() -> None:
     p_scan = subparsers.add_parser("scan", help="Scan and list public Kaggle kernels")
     p_scan.add_argument("--user", help="Kaggle username")
     p_scan.add_argument("--page-size", type=int, default=100, help="Number of kernels to list")
+    p_scan.add_argument("--include-private", action="store_true", help="Include private kernels (default: public kernels only)")
     p_scan.set_defaults(func=cmd_scan)
 
     # download
-    p_dl = subparsers.add_parser("download", help="Download Kaggle kernels")
+    p_dl = subparsers.add_parser("download", help="Download Kaggle kernels (public only by default)")
     p_dl.add_argument("--user", help="Kaggle username")
     p_dl.add_argument("--slugs", nargs="*", help="Specific kernel slugs to download")
+    p_dl.add_argument("--include-private", action="store_true", help="Include private kernels (default: public kernels only)")
     p_dl.add_argument("--output-dir", default=DEFAULT_DOWNLOAD_DIR, help="Staging output directory")
     p_dl.set_defaults(func=cmd_download)
 
@@ -432,10 +442,11 @@ def main() -> None:
     p_pub.set_defaults(func=cmd_publish)
 
     # run-all
-    p_all = subparsers.add_parser("run-all", help="Download, build, and publish in one command")
+    p_all = subparsers.add_parser("run-all", help="Download, build, and publish public notebooks in one command")
     p_all.add_argument("--user", required=True, help="Kaggle username")
     p_all.add_argument("--github-user", required=True, help="GitHub username")
     p_all.add_argument("--slugs", nargs="*", help="Specific kernel slugs (optional)")
+    p_all.add_argument("--include-private", action="store_true", help="Include private kernels (default: public kernels only)")
     p_all.add_argument("--author", help="Author name")
     p_all.add_argument("--token", help="GitHub token")
     p_all.add_argument("--private", action="store_true", help="Publish repositories as private (default: public)")

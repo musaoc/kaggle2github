@@ -35,19 +35,28 @@ class KaggleClient:
                 )
         return self._api
 
-    def list_kernels(self, user: Optional[str] = None, page_size: int = 100) -> List[Dict]:
+    def list_kernels(
+        self,
+        user: Optional[str] = None,
+        page_size: int = 100,
+        include_private: bool = False,
+    ) -> List[Dict]:
         """
-        List all public kernels for the given user.
+        List kernels for the given user. By default, lists ONLY public kernels.
         """
         target_user = user or self.username
         if not target_user:
             raise ValueError("Kaggle username must be specified to list kernels.")
 
         api = self._get_api()
-        raw_kernels = api.kernels_list(user=target_user, page_size=page_size)
+        raw_kernels = api.kernels_list(user=target_user, page_size=page_size) or []
 
         results = []
         for k in raw_kernels:
+            is_priv = bool(getattr(k, "is_private", False) or getattr(k, "isPrivate", False))
+            if not include_private and is_priv:
+                continue
+
             ref = getattr(k, "ref", "")
             slug = ref.split("/")[-1] if "/" in ref else getattr(k, "slug", "")
             results.append({
@@ -55,10 +64,11 @@ class KaggleClient:
                 "slug": slug,
                 "title": getattr(k, "title", slug),
                 "author": getattr(k, "author", target_user),
-                "votes": getattr(k, "totalVotes", 0),
-                "views": getattr(k, "totalViews", 0),
+                "votes": getattr(k, "totalVotes", 0) or getattr(k, "total_votes", 0),
+                "views": getattr(k, "totalViews", 0) or getattr(k, "total_views", 0),
                 "url": f"https://www.kaggle.com/code/{ref}",
-                "last_run": str(getattr(k, "lastRunTime", "")),
+                "last_run": str(getattr(k, "lastRunTime", "") or getattr(k, "last_run_time", "")),
+                "is_private": is_priv,
             })
 
         return results

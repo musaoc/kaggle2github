@@ -32,78 +32,55 @@ cd kaggle2github
 pip install -e .
 ```
 
-### 2. 1-Minute Authentication Wizard
+### 2. Connect Your Accounts
 Run the interactive setup helper:
 ```bash
 kaggle2github setup
 ```
-> **What the wizard does for you:**
-> - Detects `kaggle.json` if it's already in your `Downloads` folder and installs it automatically.
-> - Automatically creates the `~/.kaggle/` directory with secure permissions.
-> - Verifies your Kaggle and GitHub credentials on the spot.
-> - Offers to save credentials directly to a local `.env` file for easy account switching.
-> - **Switch accounts anytime:** Run `kaggle2github setup --reconfigure` or edit your `.env` file!
+*(Verifies credentials, detects downloaded `kaggle.json`, and can save directly to a `.env` file).*
 
-### 3. Run Full Migration (One Command)
+### 3. Run Full Migration
+Migrate all your **public** Kaggle notebooks into clean, public GitHub repositories in one command:
 ```bash
 kaggle2github run-all --user <your_kaggle_username> --github-user <your_github_username>
 ```
 
-> 🌐 **Public by Default**: All repositories are published as **Public** on your GitHub profile so they immediately showcase on your profile, resume, and portfolio!
-> *(Prefer private? Simply add the `--private` flag).*
+> 🌐 **Public by Default**: By default, only your **public** Kaggle work is downloaded and published as **public** GitHub repositories. Private notebooks are never touched unless you explicitly pass `--include-private`.
 
 ---
 
-## 🔑 Authentication Details
+## 🔑 Authentication & Credentials
 
-### Quickest Method: Local `.env` File (Recommended)
-Copy [.env.example](.env.example) to `.env` in the repository root and fill in your keys:
+You can authenticate in any of the following three ways:
+
+### Method 1: Interactive Setup Wizard (Recommended)
 ```bash
-cp .env.example .env
+kaggle2github setup
 ```
-*(On Windows PowerShell: `Copy-Item .env.example .env`)*
+- Automatically detects `kaggle.json` in your `Downloads` folder.
+- Verifies your GitHub token and Kaggle keys on the spot.
+- **To switch accounts or change tokens:** Run `kaggle2github setup --reconfigure`.
 
-Inside `.env`:
+### Method 2: Local `.env` File
+Copy [.env.example](.env.example) to `.env` in the repository root:
+```bash
+# On Linux/macOS
+cp .env.example .env
+
+# On Windows PowerShell
+Copy-Item .env.example .env
+```
+Fill in your credentials:
 ```ini
 KAGGLE_USERNAME=your_kaggle_username
 KAGGLE_KEY=your_kaggle_api_key
 GITHUB_TOKEN=ghp_your_github_token
 ```
-`kaggle2github` automatically loads this `.env` file whenever you run commands. To switch accounts, simply change the values in `.env` or run `kaggle2github setup --reconfigure`.
+`kaggle2github` automatically loads this `.env` file for every command.
 
----
-
-### Alternative: Manual System Setup
-
-If you prefer system-wide setup instead of `.env`:
-
-#### Kaggle API Setup
-1. Log in to [Kaggle](https://www.kaggle.com) and go to your [Account Settings](https://www.kaggle.com/settings).
-2. Scroll to the **API** section and click **"Create New Token"**. This downloads `kaggle.json`.
-3. Place `kaggle.json` in the `.kaggle` folder in your home directory:
-   - **Windows (PowerShell)**:
-     ```powershell
-     New-Item -ItemType Directory -Force "$HOME\.kaggle"
-     Move-Item "$HOME\Downloads\kaggle.json" "$HOME\.kaggle\kaggle.json"
-     ```
-   - **macOS / Linux**:
-     ```bash
-     mkdir -p ~/.kaggle
-     mv ~/Downloads/kaggle.json ~/.kaggle/kaggle.json
-     chmod 600 ~/.kaggle/kaggle.json
-     ```
-
-#### GitHub Token Setup
-1. Generate a Personal Access Token (classic) with **`repo`** scope at [GitHub Token Settings](https://github.com/settings/tokens/new?scopes=repo&description=kaggle2github).
-2. Set the token in your terminal:
-   - **Windows (PowerShell)**:
-     ```powershell
-     $env:GITHUB_TOKEN="ghp_yourTokenHere"
-     ```
-   - **macOS / Linux**:
-     ```bash
-     export GITHUB_TOKEN="ghp_yourTokenHere"
-     ```
+### Method 3: System Environment / Files
+- **Kaggle**: Place `kaggle.json` in `~/.kaggle/kaggle.json` (or set `KAGGLE_USERNAME` and `KAGGLE_KEY`).
+- **GitHub**: Set `GITHUB_TOKEN="ghp_xxx"` in your terminal (`$env:GITHUB_TOKEN` on PowerShell / `export GITHUB_TOKEN` on Linux/macOS).
 
 ---
 
